@@ -2,7 +2,7 @@
 import telebot
 from datetime import datetime, timedelta
 import re
-bot = telebot.TeleBot("5970225649:AAGJaSAkPfGyN3VGMkld7FshVAHmMyxcm0w")
+bot = telebot.TeleBot("XXXXXXXX:XXXXXXXXXX")
 
 def remove_brackets(input_string):
     output_string = re.sub(r'\([^)]*\)', '', input_string)
@@ -68,7 +68,7 @@ try:
     else:
         print("时间差大于等于2小时")
         msg+="\n！！！注意开始时间与当前时间相差2小时以上，请检查程序是否正常运行！！！"
-    bot.send_message(chat_id='1439363098',
+    bot.send_message(chat_id='XXXXXXXXXX',
                      text="MAA操作完成，共行动"+str(atk_count)+"次"+str(msg))
     print("MAA操作完成，共行动"+str(atk_count)+"次"+str(msg))
 except:

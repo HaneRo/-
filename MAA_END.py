@@ -39,9 +39,9 @@ def readLog():
                     for item in lines_to_read:
                         key, value = item.split(':')
                         if key in counts:
-                            counts[key] += int(value)
+                            counts[key] += int(value.replace(',', ''))
                         else:
-                            counts[key] = int(value)
+                            counts[key] = int(value.replace(',', ''))
                 if "已开始行动" in line:
                     atk_count += 1
                 if "任务出错" in line:

@@ -18,6 +18,7 @@ def readLog():
         msg = ""
         getlist = ""
         counts = {}
+        sanity = ""
         with open('./debug/gui.log', encoding='utf-8') as log:
             should_read = False  # 是否开始读取标志
             lines_to_read = []  # 存储需要读取的行
@@ -31,21 +32,26 @@ def readLog():
                     getlist = ""
                     lines_to_read = []
                     counts = {}
+                    sanity = ""
                     start_time = datetime.strptime(
                         line[:25], '[%Y-%m-%d %H:%M:%S.%f]')
-                # if "开始任务: Fight" in line:
-                #     print("开始任务")
+                if "开始任务: Fight" in line:
+                    lines_to_read = []
                 if "完成任务: Fight" in line:
                     for item in lines_to_read:
-                        key, value = item.split(':')
-                        if key in counts:
-                            counts[key] += int(value.replace(',', ''))
-                        else:
-                            counts[key] = int(value.replace(',', ''))
+                        if bool(re.match(r'^(?:"[^"]+"|“[^”]+”|\w+)\s*:\s*((\d{1,3}(,\d{3})*)|\d+)$', item)):
+                            key, value = item.split(':')
+                            if key in counts:
+                                counts[key] += int(value.replace(',', ''))
+                            else:
+                                counts[key] = int(value.replace(',', ''))
                 if "已开始行动" in line:
                     atk_count += 1
                 if "任务出错" in line:
                     msg += ",任务出错"
+                if "理智将在" in line:
+                    sanity = line
+                # 下面为掉落统计
                 if "<>" in line:
                     # 检测到结束关键字，停止读取
                     should_read = False
@@ -64,6 +70,7 @@ def readLog():
         if len(getlist) != 0:
             msg += ",共获取到"
         msg += getlist
+        msg += sanity
 
         diff = datetime.now() - start_time
         # 定义时间阈值为2小时

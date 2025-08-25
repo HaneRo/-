@@ -4,86 +4,180 @@ from datetime import datetime, timedelta
 import re
 import telebot
 import serverchan
+import yaml
+import sys
 
 
-telegram_bot = telebot.TeleBot("XXXXXXXX:XXXXXXXXXX")
-telegram_chat_id = XXXXXXXXXX
-serverchan_key = 'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'
-serverchan_channel = '9'
+try:
+        with open("notify.yaml", "r", encoding="utf-8") as f:
+            config = yaml.safe_load(f)       
+            telegram_token=config["notify"]["bot_token"]
+            telegram_chat_id=config["notify"]["chat_id"]
+            proxy=config["notify"]["proxy"]
+            serverchan_key =config["notify"]["serverchan_key"]
+            serverchan_channel =config["notify"]["serverchan_channel"]
+            
+except (FileNotFoundError, yaml.YAMLError) as e:
+        print(f"配置加载失败: {str(e)}")
+        sys.exit(1)
 
+telegram_bot = telebot.TeleBot(token=telegram_token)
 
 def readLog():
     try:
         atk_count = 0
         msg = ""
-        getlist = ""
-        counts = {}
-        sanity = ""
+        sanity = "" #理智恢复提示
+        drops = {}  # 存储所有掉落物品及其数量
+        stages = {}  # 存储关卡信息及其次数
+        
+        # 正则表达式匹配掉落统计行
+        drop_pattern = re.compile(r'^\[.*?\]\[.*?\] <.*?><.*?> (.*?) 掉落统计:')
+        item_pattern = re.compile(r'^(.*?) : ([\d,]+) \(\+([\d,]+)\)$')
+        action_pattern = re.compile(r"开始行动\s*(?:\d+\s*~\s*)?(\d+)\s*次")
+        
         with open('./debug/gui.log', encoding='utf-8') as log:
-            should_read = False  # 是否开始读取标志
-            lines_to_read = []  # 存储需要读取的行
-            # 读取文件
             contents = log.readlines()
+            
+            current_stage = None  # 当前正在处理的关卡
+            reading_drops = False  # 是否正在读取掉落信息
+            in_refill_task = False  # 是否在刷理智任务中
+            current_task_actions = 0  # 当前刷理智任务的行动次数
+            start_time = None  # 任务开始时间
+            current_refill_stage = None  # 当前刷理智任务的关卡
+            
             for line in contents:
-                line = re.sub(r'\([^)]*\)', '', line).strip()
+                line = line.strip()
+                
+                # 检测任务开始，重置计数
                 if "开始任务: 开始前脚本" in line:
                     atk_count = 0
                     msg = ""
-                    getlist = ""
-                    lines_to_read = []
-                    counts = {}
                     sanity = ""
+                    drops = {}
+                    stages = {}
                     start_time = datetime.strptime(
                         line[:25], '[%Y-%m-%d %H:%M:%S.%f]')
-                if "开始任务: Fight" in line:
-                    lines_to_read = []
-                if "完成任务: Fight" in line:
-                    for item in lines_to_read:
-                        if bool(re.match(r'^(?:"[^"]+"|“[^”]+”|\w+)\s*:\s*((\d{1,3}(,\d{3})*)|\d+)$', item)):
-                            key, value = item.split(':')
-                            if key in counts:
-                                counts[key] += int(value.replace(',', ''))
-                            else:
-                                counts[key] = int(value.replace(',', ''))
-                if "已开始行动" in line:
-                    atk_count += 1
+                
+                # 检测刷理智任务开始
+                if "开始任务: 刷理智" in line:
+                    in_refill_task = True
+                    current_task_actions = 0
+                
+                # 检测刷理智任务结束
+                if "完成任务: 刷理智" in line:
+                    in_refill_task = False
+                    atk_count += current_task_actions
+                    
+                    # 将行动次数分配到对应的关卡
+                    if current_refill_stage:
+                        if current_refill_stage in stages:
+                            stages[current_refill_stage] += current_task_actions
+                        else:
+                            stages[current_refill_stage] = current_task_actions
+                    
+                    # 重置当前刷理智任务的关卡和行动次数
+                    current_refill_stage = None
+                    current_task_actions = 0
+                
+                # 检测行动次数（只在刷理智任务中计算）
+                if in_refill_task and "开始行动" in line:
+                    # 使用正则表达式提取行动次数
+                    action_match = action_pattern.search(line)
+                    if action_match:
+                        current_task_actions = int(action_match.group(1))
+                    else:
+                        # 如果没有匹配到范围格式，但有"开始行动"，输出提示
+                        msg += ",行动次数计算错误"
+                
+                # 检测任务出错
                 if "任务出错" in line:
                     msg += ",任务出错"
+                
+                # 检测理智信息
                 if "理智将在" in line:
                     sanity = line
-                # 下面为掉落统计
-                if "<>" in line:
-                    # 检测到结束关键字，停止读取
-                    should_read = False
-                if should_read:
-                    # 已经开始读取，将当前行添加到列表中
-                    lines_to_read.append(line.replace(" ", ""))
-
-                if "掉落统计" in line:
-                    # 检测到起始关键字，开始读取
-                    should_read = True
-                    lines_to_read = []
-
-        result = [f'{key}:{value}' for key, value in counts.items()]
-        print(counts)
-        getlist += '、'.join(result)
-        if len(getlist) != 0:
-            msg += ",共获取到"
-        msg += getlist
+                
+                # 检测掉落统计开始
+                drop_match = drop_pattern.match(line)
+                if drop_match:
+                    current_stage = drop_match.group(1)
+                    # 更新当前刷理智任务的关卡
+                    if in_refill_task:
+                        current_refill_stage = current_stage
+                    reading_drops = True
+                    continue
+                
+                # 如果正在读取掉落信息
+                if reading_drops:
+                    # 检测物品掉落
+                    item_match = item_pattern.match(line)
+                    if item_match:
+                        item_name = item_match.group(1)
+                        total_count = int(item_match.group(2).replace(',', ''))
+                        
+                        # 更新掉落统计
+                        if item_name in drops:
+                            drops[item_name] += total_count
+                        else:
+                            drops[item_name] = total_count
+                        continue
+                    
+                    # 如果遇到其他格式的行，说明掉落统计结束
+                    if line.startswith('['):
+                        reading_drops = False
+        
+        # 生成掉落物品列表
+        drop_list = []
+        for item, count in drops.items():
+            drop_list.append(f"{item}:{count}")
+        
+        # 如果还有未计算的刷理智任务，将其行动次数加到总行动次数中
+        if in_refill_task:
+            atk_count += current_task_actions
+            
+            # 将行动次数分配到对应的关卡
+            if current_refill_stage:
+                if current_refill_stage in stages:
+                    stages[current_refill_stage] += current_task_actions
+                else:
+                    stages[current_refill_stage] = current_task_actions
+        
+        # 检查时间差
+        if start_time:
+            diff = datetime.now() - start_time
+            threshold = timedelta(hours=2)
+            if diff < threshold:
+                print("时间差小于2小时")
+            else:
+                print("时间差大于等于2小时")
+                msg += "\n！！！注意开始时间与当前时间相差2小时以上，请检查程序是否正常运行！！！"
+        
+        # 计算关卡统计总次数
+        total_stage_count = sum(stages.values())
+        
+        # 如果行动次数与关卡统计不一致，将差异分配到"未知关卡"
+        if atk_count != total_stage_count:
+            diff = atk_count - total_stage_count
+            stages["错误记录"] = diff
+        
+        # 生成关卡信息
+        stage_list = []
+        for stage, count in stages.items():
+            stage_list.append(f"{stage}({count}次)")
+        
+        # 组合信息
+        if drop_list:
+            msg += ",共获取到" + "、".join(drop_list)
+        
+        if stage_list:
+            msg += ",关卡:" + "、".join(stage_list)
+        
         msg += sanity
-
-        diff = datetime.now() - start_time
-        # 定义时间阈值为2小时
-        threshold = timedelta(hours=2)
-        # 比较时间差是否小于阈值
-        if diff < threshold:
-            print("时间差小于2小时")
-        else:
-            print("时间差大于等于2小时")
-            msg += "\n！！！注意开始时间与当前时间相差2小时以上，请检查程序是否正常运行！！！"
+        
         return "MAA操作完成，共行动"+str(atk_count)+"次"+str(msg)
-    except:
-        print("读取日志失败")
+    except Exception as e:
+        print(f"读取日志失败: {str(e)}")
         return "读取日志失败"
 
 

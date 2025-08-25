@@ -1,0 +1,8 @@
+notify:
+  bot_token: 'XXXXXXXX:XXXXXXXXXX'
+  chat_id: 'XXXXXXXXXX'
+  serverchan_key: 'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'
+  serverchan_channel: '9'
+  proxy: 'socks5://127.0.0.1:7890'
+
+# list字段填写关注执行状态的项目，bot_token和user_id填写telegram机器人token和接受消息的用户ID
